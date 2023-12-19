@@ -3,7 +3,7 @@ module github.com/TheGameProfi/terraform-provider-proxmox
 go 1.19
 
 require (
-	github.com/TheGameProfi/proxmox-api-go v0.0.0-20231120150129-e17249881e72
+	github.com/TheGameProfi/proxmox-api-go v1.0.1-0.20231219115418-1bc0e9c59f90
 	github.com/google/uuid v1.4.0
 	github.com/hashicorp/go-cty v1.4.1-0.20200414143053-d3edf31b6320
 	github.com/hashicorp/terraform-plugin-sdk/v2 v2.31.0
@@ -15,6 +15,9 @@ require (
 	github.com/ProtonMail/go-crypto v0.0.0-20230828082145-3c4c8a2d2371 // indirect
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
 	github.com/cloudflare/circl v1.3.3 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/spf13/cobra v1.8.0 // indirect
+	github.com/spf13/pflag v1.0.5 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20231127180814-3a041ad873d4 // indirect
 )
 

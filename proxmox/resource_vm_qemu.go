@@ -1078,7 +1078,7 @@ func resourceVmQemuCreate(ctx context.Context, d *schema.ResourceData, meta inte
 
 	var targetNode string
 
-	if targetNodes == nil || len(targetNodes) == 0 {
+	if len(targetNodes) == 0 {
 		targetNode = d.Get("target_node").(string)
 	} else {
 		targetNode = targetNodes[rand.Intn(len(targetNodes))]
@@ -1675,7 +1675,7 @@ func resourceVmQemuRead(ctx context.Context, d *schema.ResourceData, meta interf
 		targetNodes[i] = raw.(string)
 	}
 
-	if targetNodes == nil || len(targetNodes) == 0 {
+	if len(targetNodes) == 0 {
 		_, err = client.GetVmInfo(vmr)
 		if err != nil {
 			logger.Debug().Int("vmid", vmID).Err(err).Msg("failed to get vm info")
@@ -1689,12 +1689,13 @@ func resourceVmQemuRead(ctx context.Context, d *schema.ResourceData, meta interf
 			_, err = client.GetVmInfo(vmr)
 			if err != nil {
 				d.SetId("")
+				break
 			}
 
 			d.SetId(resourceId(vmr.Node(), "qemu", vmr.VmId()))
 			logger.Debug().Any("Setting node id to", d.Get(vmr.Node()))
 			targetNodeVMR = targetNode
-			break
+
 		}
 	}
 

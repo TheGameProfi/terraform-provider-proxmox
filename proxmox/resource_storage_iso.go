@@ -70,6 +70,9 @@ func resourceStorageIsoCreate(d *schema.ResourceData, meta interface{}) error {
 
 	client := pconf.Client
 	file, err := os.CreateTemp("/tmp", fileName)
+	if err != nil {
+		return fmt.Errorf("failed to create Temp: %v", err)
+	}
 	err = _downloadFile(url, file)
 	if err != nil {
 		return fmt.Errorf("failed to download file: %v", err)

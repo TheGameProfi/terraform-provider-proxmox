@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
 	"net/url"
 	"path"
@@ -72,6 +73,17 @@ func resourceVmQemu() *schema.Resource {
 				Optional: true,
 				// Default:     "",
 				Description: "The VM name",
+				ValidateFunc: func(val interface{}, key string) (warns []string, errs []error) {
+					v := val.(string)
+					matched, err := regexp.Match("[^a-zA-Z0-9-]", []byte(v))
+					if err != nil {
+						warns = append(warns, fmt.Sprintf("%q, had an error running regexp.Match err=[%v]", key, err))
+					}
+					if matched {
+						errs = append(errs, fmt.Errorf("%q, must be contain only alphanumerics and hyphens", key, v))
+					}
+					return
+				},
 			},
 			"desc": {
 				Type:     schema.TypeString,
@@ -84,8 +96,16 @@ func resourceVmQemu() *schema.Resource {
 			},
 			"target_node": {
 				Type:        schema.TypeString,
-				Required:    true,
+				Optional:    true,
 				Description: "The node where VM goes to",
+			},
+			"target_nodes": {
+				Type:     schema.TypeList,
+				Optional: true,
+				Elem: &schema.Schema{
+					Type: schema.TypeString,
+				},
+				Description: "A list of nodes where VM goes to",
 			},
 			"bios": {
 				Type:             schema.TypeString,
@@ -413,6 +433,29 @@ func resourceVmQemu() *schema.Resource {
 					},
 				},
 			},
+			"efidisk": {
+				Type:     schema.TypeList,
+				Optional: true,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"storage": {
+							Type:     schema.TypeString,
+							Required: true,
+							ForceNew: true,
+						},
+						"efitype": {
+							Type:     schema.TypeString,
+							Optional: true,
+							Default:  "4m",
+							ValidateFunc: validation.StringInSlice([]string{
+								"2m",
+								"4m",
+							}, false),
+							ForceNew: true,
+						},
+					},
+				},
+			},
 			"disk": {
 				Type:          schema.TypeList,
 				Optional:      true,
@@ -560,6 +603,11 @@ func resourceVmQemu() *schema.Resource {
 							Type:     schema.TypeInt,
 							Optional: true,
 							Default:  0,
+						},
+						// Import disk
+						"import_from": {
+							Type:     schema.TypeString,
+							Optional: true,
 						},
 						"serial": {
 							Type:         schema.TypeString,
@@ -789,6 +837,19 @@ func resourceVmQemu() *schema.Resource {
 					return strings.TrimSpace(old) == strings.TrimSpace(new)
 				},
 			},
+			"ipconfig": {
+				Type:     schema.TypeList,
+				Optional: true,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"config": {
+							Type:        schema.TypeString,
+							Required:    true,
+							Description: "ipconfig string in format: [gw=<GatewayIPv4>] [,gw6=<GatewayIPv6>] [,ip=<IPv4Format/CIDR>] [,ip6=<IPv6Format/CIDR>]",
+						},
+					},
+				},
+			},
 			"ipconfig0": {
 				Type:     schema.TypeString,
 				Optional: true,
@@ -930,6 +991,7 @@ func resourceVmQemuCreate(ctx context.Context, d *schema.ResourceData, meta inte
 
 	qemuNetworks, _ := ExpandDevicesList(d.Get("network").([]interface{}))
 	qemuDisks, _ := ExpandDevicesList(d.Get("disk").([]interface{}))
+	qemuEfiDisks, _ := ExpandDevicesList(d.Get("efidisk").([]interface{}))
 
 	serials := d.Get("serial").(*schema.Set)
 	qemuSerials, _ := DevicesSetToMap(serials)
@@ -937,6 +999,19 @@ func resourceVmQemuCreate(ctx context.Context, d *schema.ResourceData, meta inte
 	qemuPCIDevices, _ := ExpandDevicesList(d.Get("hostpci").([]interface{}))
 
 	qemuUsbs, _ := ExpandDevicesList(d.Get("usb").([]interface{}))
+
+	// Populate Ipconfig map from iterable variable
+	qemuIpconfig, _ := ExpandIpconfigList(d.Get("ipconfig").([]interface{}))
+	// keeping this for backwards compatibility
+	if len(qemuIpconfig) == 0 {
+		// Populate Ipconfig map from explicit vars
+		for i := 0; i < 16; i++ {
+			iface := fmt.Sprintf("ipconfig%d", i)
+			if v, ok := d.GetOk(iface); ok {
+				qemuIpconfig[i] = v.(string)
+			}
+		}
+	}
 
 	config := pxapi.ConfigQemu{
 		Name:           vmName,
@@ -978,23 +1053,41 @@ func resourceVmQemuCreate(ctx context.Context, d *schema.ResourceData, meta inte
 		Searchdomain: d.Get("searchdomain").(string),
 		Nameserver:   d.Get("nameserver").(string),
 		Sshkeys:      d.Get("sshkeys").(string),
-		Ipconfig:     pxapi.IpconfigMap{},
+		Ipconfig:     qemuIpconfig,
 	}
-	// Populate Ipconfig map
-	for i := 0; i < 16; i++ {
-		iface := fmt.Sprintf("ipconfig%d", i)
-		if v, ok := d.GetOk(iface); ok {
-			config.Ipconfig[i] = v.(string)
-		}
-	}
+
 	if len(qemuVgaList) > 0 {
 		config.QemuVga = qemuVgaList[0].(map[string]interface{})
 	}
+
+	if len(qemuEfiDisks) > 0 {
+		config.EFIDisk = qemuEfiDisks[0]
+	}
+
 	log.Printf("[DEBUG][QemuVmCreate] checking for duplicate name: %s", vmName)
 	dupVmr, _ := client.GetVmRefByName(vmName)
 
 	forceCreate := d.Get("force_create").(bool)
-	targetNode := d.Get("target_node").(string)
+
+	var targetNodes []string
+	targetNodesRaw := d.Get("target_nodes").([]interface{})
+	targetNodes = make([]string, len(targetNodesRaw))
+	for i, raw := range targetNodesRaw {
+		targetNodes[i] = raw.(string)
+	}
+
+	var targetNode string
+
+	if targetNodes == nil || len(targetNodes) == 0 {
+		targetNode = d.Get("target_node").(string)
+	} else {
+		targetNode = targetNodes[rand.Intn(len(targetNodes))]
+	}
+
+	if targetNode == "" {
+		return diag.FromErr(fmt.Errorf("VM name (%s) has no target node! Please use target_node or target_nodes to set a specific node! %v", vmName, targetNodes))
+	}
+
 	pool := d.Get("pool").(string)
 
 	if dupVmr != nil && forceCreate {
@@ -1063,7 +1156,7 @@ func resourceVmQemuCreate(ctx context.Context, d *schema.ResourceData, meta inte
 			// update the current working state to use the appropriate file specification
 			// proxmox needs so we can correctly update the existing disks (post-clone)
 			// instead of accidentially causing the existing disk to be detached.
-			// see https://github.com/thegameprofi/terraform-provider-proxmox/issues/239
+			// see https://github.com/Telmate/terraform-provider-proxmox/issues/239
 			for slot, disk := range config_post_clone.QemuDisks {
 				// only update the desired configuration if it was not set by the user
 				// we do not want to overwrite the desired config with the results from
@@ -1243,12 +1336,33 @@ func resourceVmQemuUpdate(ctx context.Context, d *schema.ResourceData, meta inte
 		return diag.FromErr(fmt.Errorf("error while processing Usb configuration: %v", err))
 	}
 
+	// Populate Ipconfig map from iterable variable
+	qemuIpconfig, err := ExpandIpconfigList(d.Get("ipconfig").([]interface{}))
+	if err != nil {
+		return diag.FromErr(fmt.Errorf("error while processing ipconfig configuration: %v", err))
+	}
+	// keeping this for backwards compatibility
+	if len(qemuIpconfig) == 0 {
+		// Populate Ipconfig map from explicit vars
+		for i := 0; i < 16; i++ {
+			iface := fmt.Sprintf("ipconfig%d", i)
+			if v, ok := d.GetOk(iface); ok {
+				qemuIpconfig[i] = v.(string)
+			}
+		}
+	}
+
 	d.Partial(true)
 	if d.HasChange("target_node") {
-		_, err := client.MigrateNode(vmr, d.Get("target_node").(string), true)
-		if err != nil {
-			return diag.FromErr(err)
+		// check if it must be migrated manually or it has been migrated by the promox high availability system
+		if vmr.Node() != d.Get("target_node").(string) {
+			_, err := client.MigrateNode(vmr, d.Get("target_node").(string), true)
+			if err != nil {
+				return diag.FromErr(err)
+			}
 		}
+
+		// update target node
 		vmr.SetNode(d.Get("target_node").(string))
 	}
 	d.Partial(false)
@@ -1293,24 +1407,7 @@ func resourceVmQemuUpdate(ctx context.Context, d *schema.ResourceData, meta inte
 		Searchdomain: d.Get("searchdomain").(string),
 		Nameserver:   d.Get("nameserver").(string),
 		Sshkeys:      d.Get("sshkeys").(string),
-		Ipconfig: pxapi.IpconfigMap{
-			0:  d.Get("ipconfig0").(string),
-			1:  d.Get("ipconfig1").(string),
-			2:  d.Get("ipconfig2").(string),
-			3:  d.Get("ipconfig3").(string),
-			4:  d.Get("ipconfig4").(string),
-			5:  d.Get("ipconfig5").(string),
-			6:  d.Get("ipconfig6").(string),
-			7:  d.Get("ipconfig7").(string),
-			8:  d.Get("ipconfig8").(string),
-			9:  d.Get("ipconfig9").(string),
-			10: d.Get("ipconfig10").(string),
-			11: d.Get("ipconfig11").(string),
-			12: d.Get("ipconfig12").(string),
-			13: d.Get("ipconfig13").(string),
-			14: d.Get("ipconfig14").(string),
-			15: d.Get("ipconfig15").(string),
-		},
+		Ipconfig:     qemuIpconfig,
 	}
 	if len(qemuVgaList) > 0 {
 		config.QemuVga = qemuVgaList[0].(map[string]interface{})
@@ -1326,7 +1423,9 @@ func resourceVmQemuUpdate(ctx context.Context, d *schema.ResourceData, meta inte
 	// give sometime to proxmox to catchup
 	time.Sleep(time.Duration(d.Get("additional_wait").(int)) * time.Second)
 
-	prepareDiskSize(client, vmr, qemuDisks, d)
+	if err := prepareDiskSize(client, vmr, qemuDisks, d); err != nil {
+		return diag.FromErr(err)
+	}
 
 	// give sometime to proxmox to catchup
 	time.Sleep(time.Duration(d.Get("additional_wait").(int)) * time.Second)
@@ -1366,6 +1465,7 @@ func resourceVmQemuUpdate(ctx context.Context, d *schema.ResourceData, meta inte
 		"searchdomain",
 		"nameserver",
 		"sshkeys",
+		"ipconfig",
 		"ipconfig0",
 		"ipconfig1",
 		"ipconfig2",
@@ -1495,13 +1595,22 @@ func resourceVmQemuUpdate(ctx context.Context, d *schema.ResourceData, meta inte
 		}
 	} else if err == nil && vmState["status"] != "stopped" && d.Get("reboot_required").(bool) {
 		if d.Get("automatic_reboot").(bool) {
-			log.Print("[DEBUG][QemuVmUpdate] shutting down VM for required reboot")
-			_, err = client.ShutdownVm(vmr)
+			log.Print("[DEBUG][QemuVmUpdate] rebooting the VM to match the configuration changes")
+			_, err = client.RebootVm(vmr)
 			// note: the default timeout is 3 min, configurable per VM: Options/Start-Shutdown Order/Shutdown timeout
 			if err != nil {
-				log.Print("[DEBUG][QemuVmUpdate] shutdown failed, stopping VM forcefully")
-				_, err = client.StopVm(vmr)
-				if err != nil {
+				log.Print("[DEBUG][QemuVmUpdate] reboot failed, stopping VM forcefully")
+
+				if _, err := client.StopVm(vmr); err != nil {
+					return diag.FromErr(err)
+				}
+
+				// give sometime to proxmox to catchup
+				dur := time.Duration(d.Get("additional_wait").(int)) * time.Second
+				log.Printf("[DEBUG][QemuVmUpdate] waiting for (%v) before starting the VM again", dur)
+				time.Sleep(dur)
+
+				if _, err := client.StartVm(vmr); err != nil {
 					return diag.FromErr(err)
 				}
 			}
@@ -1514,12 +1623,6 @@ func resourceVmQemuUpdate(ctx context.Context, d *schema.ResourceData, meta inte
 				Detail:        "One or more parameters are modified that only take effect after a reboot (shutdown & start).",
 				AttributePath: cty.Path{},
 			})
-		}
-	} else if err == nil && vmState["status"] == "stopped" && d.Get("vm_state").(string) == "running" {
-		log.Print("[DEBUG][QemuVmUpdate] starting VM")
-		_, err = client.StartVm(vmr)
-		if err != nil {
-			return diag.FromErr(err)
 		}
 	} else if err != nil {
 		diags = append(diags, diag.FromErr(err)...)
@@ -1562,12 +1665,45 @@ func resourceVmQemuRead(ctx context.Context, d *schema.ResourceData, meta interf
 	// Try to get information on the vm. If this call err's out
 	// that indicates the VM does not exist. We indicate that to terraform
 	// by calling a SetId("")
-	_, err = client.GetVmInfo(vmr)
-	if err != nil {
+
+	// loop through all virtual servers...?
+	var targetNodeVMR string = ""
+	var targetNodes []string
+	targetNodesRaw := d.Get("target_nodes").([]interface{})
+	targetNodes = make([]string, len(targetNodesRaw))
+	for i, raw := range targetNodesRaw {
+		targetNodes[i] = raw.(string)
+	}
+
+	if targetNodes == nil || len(targetNodes) == 0 {
+		_, err = client.GetVmInfo(vmr)
+		if err != nil {
+			logger.Debug().Int("vmid", vmID).Err(err).Msg("failed to get vm info")
+			d.SetId("")
+			return nil
+		}
+		targetNodeVMR = vmr.Node()
+	} else {
+		for _, targetNode := range targetNodes {
+			vmr.SetNode(targetNode)
+			_, err = client.GetVmInfo(vmr)
+			if err != nil {
+				d.SetId("")
+			}
+
+			d.SetId(resourceId(vmr.Node(), "qemu", vmr.VmId()))
+			logger.Debug().Any("Setting node id to", d.Get(vmr.Node()))
+			targetNodeVMR = targetNode
+			break
+		}
+	}
+
+	if targetNodeVMR == "" {
 		logger.Debug().Int("vmid", vmID).Err(err).Msg("failed to get vm info")
 		d.SetId("")
 		return nil
 	}
+
 	config, err := pxapi.NewConfigQemuFromApi(vmr, client)
 	if err != nil {
 		return diag.FromErr(err)
@@ -1597,7 +1733,6 @@ func resourceVmQemuRead(ctx context.Context, d *schema.ResourceData, meta interf
 	logger.Debug().Int("vmid", vmID).Msgf("[READ] Received Config from Proxmox API: %+v", config)
 
 	d.SetId(resourceId(vmr.Node(), "qemu", vmr.VmId()))
-	d.Set("target_node", vmr.Node())
 	d.Set("name", config.Name)
 	d.Set("desc", config.Description)
 	d.Set("bios", config.Bios)
@@ -1632,6 +1767,7 @@ func resourceVmQemuRead(ctx context.Context, d *schema.ResourceData, meta interf
 	d.Set("searchdomain", config.Searchdomain)
 	d.Set("nameserver", config.Nameserver)
 	d.Set("sshkeys", config.Sshkeys)
+	d.Set("ipconfig", config.Ipconfig)
 	d.Set("ipconfig0", config.Ipconfig[0])
 	d.Set("ipconfig1", config.Ipconfig[1])
 	d.Set("ipconfig2", config.Ipconfig[2])
@@ -1816,7 +1952,12 @@ func resourceVmQemuDelete(ctx context.Context, d *schema.ResourceData, meta inte
 		return diag.FromErr(err)
 	}
 	if vmState["status"] != "stopped" {
-		_, err := client.StopVm(vmr)
+		var err error
+		if d.Get("agent") == 1 {
+			_, err = client.ShutdownVm(vmr)
+		} else {
+			_, err = client.StopVm(vmr)
+		}
 		if err != nil {
 			return diag.FromErr(err)
 		}
@@ -2058,6 +2199,34 @@ func ExpandDevicesList(deviceList []interface{}) (pxapi.QemuDevices, error) {
 	return expandedDevices, nil
 }
 
+// Consumes a terraform TypeList of a Qemu Device (network, hard drive, etc) and returns the "Expanded"
+// version of the equivalent configuration that the API understands (the struct pxapi.IpconfigMap).
+func ExpandIpconfigList(ipconfigList []interface{}) (pxapi.IpconfigMap, error) {
+	expandedDevices := make(pxapi.IpconfigMap)
+
+	if len(ipconfigList) == 0 {
+		return expandedDevices, nil
+	}
+
+	ipconfigDevices, err := ExpandDevicesList(ipconfigList)
+	if err != nil {
+		return expandedDevices, err
+	}
+
+	for index, thisDeviceMap := range ipconfigDevices {
+		// thisDeviceMap := deviceInterface
+
+		// bail out if the device is empty, it is meaningless in this context
+		if thisDeviceMap == nil {
+			continue
+		}
+
+		expandedDevices[index] = thisDeviceMap["config"]
+	}
+
+	return expandedDevices, nil
+}
+
 // Update schema.TypeSet with new values comes from Proxmox API.
 // TODO: remove these set functions and convert attributes using a set to a list instead.
 func UpdateDevicesSet(
@@ -2212,8 +2381,8 @@ func initConnInfo(ctx context.Context,
 	if config.HasCloudInit() {
 		log.Print("[DEBUG][initConnInfo] vm has a cloud-init configuration")
 		logger.Debug().Int("vmid", vmr.VmId()).Msgf(" vm has a cloud-init configuration")
-		_, ipconfig0Set := d.GetOk("ipconfig0")
-		if ipconfig0Set {
+		_, ipconfigSet := d.GetOk("ipconfig")
+		if ipconfigSet {
 			vmState, err := client.GetVmState(vmr)
 			log.Printf("[DEBUG][initConnInfo] cloudinitcheck vm state %v", vmState)
 			logger.Debug().Int("vmid", vmr.VmId()).Msgf("cloudinitcheck vm state %v", vmState)
@@ -2223,16 +2392,17 @@ func initConnInfo(ctx context.Context,
 				return diag.FromErr(err)
 			}
 
-			if d.Get("ipconfig0").(string) != "ip=dhcp" || vmState["agent"] == nil || vmState["agent"].(float64) != 1 {
-				// parse IP address out of ipconfig0
-				ipMatch := rxIPconfig.FindStringSubmatch(d.Get("ipconfig0").(string))
+			ipConfig := d.Get("ipconfig").(map[int]string)
+			if ipConfig[0] != "ip=dhcp" || vmState["agent"] == nil || vmState["agent"].(float64) != 1 {
+				// parse IP address out of ipconfig
+				ipMatch := rxIPconfig.FindStringSubmatch(ipConfig[0])
 				if sshHost == "" {
 					sshHost = ipMatch[1]
 				}
 				ipconfig0 := net.ParseIP(strings.Split(ipMatch[1], ":")[0])
 				interfaces, err = client.GetVmAgentNetworkInterfaces(vmr)
-				log.Printf("[DEBUG][initConnInfo] ipconfig0 interfaces: %v", interfaces)
-				logger.Debug().Int("vmid", vmr.VmId()).Msgf("ipconfig0 interfaces %v", interfaces)
+				log.Printf("[DEBUG][initConnInfo] ipconfig[0] interfaces: %v", interfaces)
+				logger.Debug().Int("vmid", vmr.VmId()).Msgf("ipconfig[0] interfaces %v", interfaces)
 				if err != nil {
 					return diag.FromErr(err)
 				} else {

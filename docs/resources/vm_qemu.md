@@ -39,7 +39,7 @@ parameter to create based
 on [a Cloud-init configuration file](https://cloudinit.readthedocs.io/en/latest/topics/examples.html) or use the Proxmox
 variable `ciuser`, `cipassword`, `ipconfig0`, `ipconfig1`, `ipconfig2`, `ipconfig3`, `ipconfig4`, `ipconfig5`,
 `ipconfig6`, `ipconfig7`, `ipconfig8`, `ipconfig9`, `ipconfig10`, `ipconfig11`, `ipconfig12`, `ipconfig13`,
-`ipconfig14`,`ipconfig15`, `searchdomain`, `nameserver` and `sshkeys`.
+`ipconfig14`,`ipconfig15`, `searchdomain`, `nameserver` and `sshkeys`. A variable amount of static IPs can be configured using the dynamic [`ipconfig` block](#ipconfig-block) to list multiple IP addresses.
 
 For more information, see the [Cloud-init guide](../guides/cloud_init.md).
 
@@ -164,6 +164,12 @@ details.
 | `queues`    | `int`  | `1`           | Number of packet queues to be used on the device. Requires `virtio` model to have an effect.                                                                                                                                                                                                                                                                    |
 | `link_down` | `bool` | `false`       | Whether this interface should be disconnected (like pulling the plug).                                                                                                                                                                                                                                                                                          |
 
+### Ipconfig Block
+
+The `ipconfig` block is used to configure multiple static IP addresses. It may be specified multiple times.
+| Argument | Type  | Default Value | Description |
+| `config` | `str` |               | IP address to assign to the guest. Format: [gw=<GatewayIPv4>] [,gw6=<GatewayIPv6>] [,ip=<IPv4Format/CIDR>] [,ip6=<IPv6Format/CIDR>]. |
+
 ### Disk Block
 
 The `disk` block is used to configure the disk devices. It may be specified multiple times. The order in which the
@@ -207,38 +213,49 @@ See the [docs about disks](https://pve.proxmox.com/pve-docs/chapter-qm.html#qm_h
 
 | Argument       | Type  | Default Value | Description                                                                                                                                                                                                                                                                            |
 |----------------|-------|---------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `type`               | `str` |               | **Required** The type of disk device to add. Options: `ide`, `sata`, `scsi`, `virtio`. |
-| `storage`            | `str` |               | **Required** The name of the storage pool on which to store the disk. |
-| `size`               | `str` |               | **Required** The size of the created disk, format must match the regex `\d+[GMK]`, where G, M, and K represent Gigabytes, Megabytes, and Kilobytes respectively. |
-| `format`             | `str` | `"raw"`       | The drive’s backing file’s data format.  |
-| `cache`              | `str` | `"none"`      | The drive’s cache mode. Options: `directsync`, `none`, `unsafe`, `writeback`, `writethrough`  |
-| `backup`             | `bool` | `true`       | Whether the drive should be included when making backups. |
-| `iothread`           | `int` | `0`           | Whether to use iothreads for this drive. Only effective with a disk of type `virtio`, or `scsi` when the the emulated controller type (`scsihw` top level block argument) is `virtio-scsi-single`. |
-| `replicate`          | `int` | `0`           | Whether the drive should considered for replication jobs. |
-| `ssd`                | `int` | `0`           | Whether to expose this drive as an SSD, rather than a rotational hard disk. |
-| `discard`            | `str` |               | Controls whether to pass discard/trim requests to the underlying storage. Only effective when the underlying storage supports thin provisioning. There are other caveats too, see the [docs about disks](https://pve.proxmox.com/pve-docs/chapter-qm.html#qm_hard_disk) for more info. |
-| `aio`                | `str` |               | AIO type to use. Options: `io_uring`, `native`, `threads`. |
-| `mbps`               | `int` | `0`           | Maximum r/w speed in megabytes per second. `0` means unlimited.
-| `mbps_rd`            | `int` | `0`           | Maximum read speed in megabytes per second. `0` means unlimited. |
-| `mbps_rd_max`        | `int` | `0`           | Maximum read speed in megabytes per second. `0` means unlimited. |
-| `mbps_wr`            | `int` | `0`           | Maximum write speed in megabytes per second. `0` means unlimited.     |
-| `mbps_wr_max`        | `int` | `0`           | Maximum throttled write pool in megabytes per second. `0` means unlimited. |
-| `iops`               | `int` | `0`           | Maximum r/w I/O in operations per second. `0` means unlimited. |
-| `iops_max`           | `int` | `0`           | Maximum unthrottled r/w I/O pool in operations per second. `0` means unlimited. |
-| `iops_max_length`    | `int` | `0`           | Maximum length of I/O bursts in seconds. `0` means unlimited. |
-| `iops_rd`            | `int` | `0`           | Maximum read I/O in operations per second. `0` means unlimited. |
-| `iops_rd_max`        | `int` | `0`           | Maximum unthrottled read I/O pool in operations per second. `0` means unlimited. |
-| `iops_rd_max_length` | `int` | `0`           | Maximum length of read I/O bursts in seconds. `0` means unlimited. |
-| `iops_wr`            | `int` | `0`           | Maximum write I/O in operations per second. `0` means unlimited. |
-| `iops_wr_max`        | `int` | `0`           | Maximum unthrottled write I/O pool in operations per second. `0` means unlimited. |
-| `iops_wr_max_length` | `int` | `0`           | Maximum length of write I/O bursts in seconds. `0` means unlimited. |
-| `serial`             | `str` |               | The drive’s reported serial number, url-encoded, up to 20 bytes long. |
-| `wwn`                | `str` |               | The drive’s worldwide name, encoded as 16 bytes hex string, prefixed by 0x. |
-| `file`               | `str` |               | The filename portion of the path to the drive’s backing volume. You shouldn't need to specify this, use the `storage` parameter instead. |
-| `media`              | `str` | `"disk"`      | The drive’s media type. Options: `cdrom`, `disk`. |
-| `volume`             | `str` |               | The full path to the drive’s backing volume including the storage pool name. You shouldn't need to specify this, use the `storage` parameter instead. |
-| `slot`               | `int` |               | _(not sure what this is for, seems to be deprecated, do not use)_. |
-| `storage_type`       | `str` |               | The type of pool that `storage` is backed by. You shouldn't need to specify this, use the `storage` parameter instead. |
+| `type`		| `str`	|		| **Required** The type of disk device to add. Options: `ide`, `sata`, `scsi`, `virtio`.	|
+| `storage`		| `str` |		| **Required** The name of the storage pool on which to store the disk.		|
+| `size`		| `str` |		| **Required** The size of the created disk, format must match the regex `\d+[GMK]`, where G, M, and K represent Gigabytes, Megabytes, and Kilobytes respectively.		|
+| `format`		| `str` | `"raw"`	| The drive’s backing file’s data format.		|
+| `cache`		| `str` | `"none"`	| The drive’s cache mode. Options: `directsync`, `none`, `unsafe`, `writeback`, `writethrough`		|
+| `backup`		| `int` | `0`	| Whether the drive should be included when making backups.		|
+| `iothread`	| `int` | `0`	| Whether to use iothreads for this drive. Only effective with a disk of type `virtio`, or `scsi` when the the emulated controller type (`scsihw` top level block argument) is `virtio-scsi-single`.		|
+| `replicate`	| `int` | `0`	| Whether the drive should considered for replication jobs.		|
+| `ssd`		| `int` | `0`	| Whether to expose this drive as an SSD, rather than a rotational hard disk.		|
+| `discard`		| `str` |		| Controls whether to pass discard/trim requests to the underlying storage. Only effective when the underlying storage supports thin provisioning. There are other caveats too, see the [docs about disks](https://pve.proxmox.com/pve-docs/chapter-qm.html#qm_hard_disk) for more info.		|
+| `mbps`		| `int` | `0`	| Maximum r/w speed in megabytes per second. `0` means unlimited.		|
+| `mbps_rd`		| `int` | `0`	| Maximum read speed in megabytes per second. `0` means unlimited.		|
+| `mbps_rd_max`	| `int` | `0`	| Maximum read speed in megabytes per second. `0` means unlimited.		|
+| `mbps_wr`		| `int` | `0`	| Maximum write speed in megabytes per second. `0` means unlimited.		|
+| `mbps_wr_max`	| `int` | `0`	| Maximum throttled write pool in megabytes per second. `0` means unlimited.		|
+| `import_from`	| `str` |		| Import disk image. Value is a path local to the node, for example `/disk/image.img`.		|
+| `file`		| `str` |		| The filename portion of the path to the drive’s backing volume. You shouldn't need to specify this, use the `storage` parameter instead.		|
+| `media`		| `str` | `"disk"`	| The drive’s media type. Options: `cdrom`, `disk`.		|
+| `volume`		| `str` |		| The full path to the drive’s backing volume including the storage pool name. You shouldn't need to specify this, use the `storage` parameter instead.		|
+| `slot`		| `int` |		| _(not sure what this is for, seems to be deprecated, do not use)_.		|
+| `storage_type`	| `str` |		| The type of pool that `storage` is backed by. You shouldn't need to specify this, use the `storage` parameter instead.		|
+
+### EFI Disk Block
+
+The `efidisk` block is used to configure the disk used for EFI data storage. There may only be one EFI disk block.
+The EFI disk will be automatically pre-loaded with distribution-specific and Microsoft Standard Secure Boot keys.
+
+```hcl
+resource "proxmox_vm_qemu" "resource-name" {
+  // ...
+  efidisk {
+    efitype = "4m"
+    storage = "local-lvm"
+  }
+}
+```
+
+See the [docs about EFI disks](https://pve.proxmox.com/pve-docs/chapter-qm.html#qm_bios_and_uefi) for more details.
+
+| Argument       | Type  | Default Value | Description                                                                                                                                                                                                                                                                            |
+|----------------|-------|---------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `efitype`		| `str` | `"4m"`	| The type of efi disk device to add. Options: `2m`, `4m`		|
+| `storage`		| `str` |		| **Required** The name of the storage pool on which to store the disk.		|
 
 ### Serial Block
 

@@ -75,12 +75,12 @@ func resourceVmQemu() *schema.Resource {
 				Description: "The VM name",
 				ValidateFunc: func(val interface{}, key string) (warns []string, errs []error) {
 					v := val.(string)
-					matched, err := regexp.Match("[^a-zA-Z0-9-]", []byte(v))
+					matched, err := regexp.Match("[^a-zA-Z0-9-.]", []byte(v))
 					if err != nil {
 						warns = append(warns, fmt.Sprintf("%q, had an error running regexp.Match err=[%v]", key, err))
 					}
 					if matched {
-						errs = append(errs, fmt.Errorf("%q must contain only alphanumerics and hyphens", key))
+						errs = append(errs, fmt.Errorf("%q, must only contain alphanumerics, hyphens and dots [%v]", key, v))
 					}
 					return
 				},
@@ -1069,9 +1069,8 @@ func resourceVmQemuCreate(ctx context.Context, d *schema.ResourceData, meta inte
 
 	forceCreate := d.Get("force_create").(bool)
 
-	var targetNodes []string
 	targetNodesRaw := d.Get("target_nodes").([]interface{})
-	targetNodes = make([]string, len(targetNodesRaw))
+	var targetNodes = make([]string, len(targetNodesRaw))
 	for i, raw := range targetNodesRaw {
 		targetNodes[i] = raw.(string)
 	}
@@ -1668,9 +1667,8 @@ func resourceVmQemuRead(ctx context.Context, d *schema.ResourceData, meta interf
 
 	// loop through all virtual servers...?
 	var targetNodeVMR string = ""
-	var targetNodes []string
 	targetNodesRaw := d.Get("target_nodes").([]interface{})
-	targetNodes = make([]string, len(targetNodesRaw))
+	var targetNodes = make([]string, len(targetNodesRaw))
 	for i, raw := range targetNodesRaw {
 		targetNodes[i] = raw.(string)
 	}
@@ -1689,13 +1687,11 @@ func resourceVmQemuRead(ctx context.Context, d *schema.ResourceData, meta interf
 			_, err = client.GetVmInfo(vmr)
 			if err != nil {
 				d.SetId("")
-				break
 			}
 
 			d.SetId(resourceId(vmr.Node(), "qemu", vmr.VmId()))
 			logger.Debug().Any("Setting node id to", d.Get(vmr.Node()))
 			targetNodeVMR = targetNode
-
 		}
 	}
 

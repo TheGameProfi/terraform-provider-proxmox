@@ -165,13 +165,13 @@ func resourceLxc() *schema.Resource {
 							Type:     schema.TypeInt,
 							Required: true,
 						},
-						"storage": {
+						"mp": {
 							Type:     schema.TypeString,
 							Optional: true,
 						},
-						"mp": {
+						"storage": {
 							Type:     schema.TypeString,
-							Required: true,
+							Optional: true,
 						},
 						"acl": {
 							Type:     schema.TypeBool,

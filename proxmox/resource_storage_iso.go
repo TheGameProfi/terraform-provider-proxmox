@@ -71,17 +71,17 @@ func resourceStorageIsoCreate(d *schema.ResourceData, meta interface{}) error {
 	client := pconf.Client
 	file, err := os.CreateTemp("/tmp", fileName)
 	if err != nil {
-		return fmt.Errorf("failed to create Temp: %v", err)
+		return err
 	}
 	err = _downloadFile(url, file)
 	if err != nil {
-		return fmt.Errorf("failed to download file: %v", err)
+		return err
 	}
 	file.Seek(0, 0)
 	defer file.Close()
 	err = client.Upload(node, storage, isoContentType, fileName, file)
 	if err != nil {
-		return fmt.Errorf("failed to upload file: %v", err)
+		return err
 	}
 	volId := fmt.Sprintf("%s:%s/%s", storage, isoContentType, fileName)
 	d.SetId(volId)
@@ -102,10 +102,7 @@ func _downloadFile(url string, file *os.File) error {
 	}
 	defer resp.Body.Close()
 	_, err = io.Copy(file, resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to Copy: %v", err)
-	}
-	return nil
+	return err
 }
 
 func resourceStorageIsoRead(d *schema.ResourceData, meta interface{}) error {

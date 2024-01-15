@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.com/thegameprofi/terraform-provider-proxmox.svg?branch=master)]
+[![release](https://github.com/TheGameProfi/terraform-provider-proxmox/actions/workflows/release.yml/badge.svg)](https://github.com/TheGameProfi/terraform-provider-proxmox/actions/workflows/release.yml)
 
 # Terraform provider plugin for Proxmox
 

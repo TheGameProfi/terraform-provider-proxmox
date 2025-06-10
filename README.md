@@ -2,6 +2,11 @@
 
 # Terraform provider plugin for Proxmox
 
+> [!CAUTION]
+> This Repo is now deprecated since the Original is Maintained again and has all the Fixes that are included here.
+> Please Switch Back to the Main Repo to have all the Latest Updates
+> https://github.com/telmate/terraform-provider-proxmox
+
 This repository provides a Terraform provider for
 the [Proxmox virtualization platform](https://pve.proxmox.com/pve-docs/) and exposes Terraform resources to provision
 QEMU VMs and LXC Containers.
